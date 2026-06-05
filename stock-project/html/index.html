@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>실시간 주식 시세 검색</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <h1>📈 실시간 주식 시세 검색</h1>
+
+    <div class="search-box">
+        <input type="text" id="stockName" placeholder="종목명을 입력하세요"
+               oninput="showSuggestions()" onkeydown="handleEnter(event)">
+        <button onclick="searchStock()">검색</button>
+    </div>
+
+    <div class="suggestions" id="suggestions"></div>
+    <div class="result" id="result">검색 결과가 여기에 표시됩니다.</div>
+
+    <div class="chart-box">
+        <canvas id="stockChart"></canvas>
+    </div>
+
+    <div class="time" id="time"></div>
+</div>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #f2f4f7;
+        margin: 0;
+        padding: 0;
+    }
+
+    .container {
+        width: 800px;
+        margin: 50px auto;
+        background: white;
+        padding: 40px;
+        border-radius: 15px;
+        box-shadow: 0 0 15px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+        text-align: center;
+    }
+
+    .search-box {
+        display: flex;
+        gap: 10px;
+    }
+
+    input {
+        flex: 1;
+        padding: 14px;
+        font-size: 16px;
+        border: 1px solid #ccc;
+        border-radius: 10px;
+    }
+
+    button {
+        padding: 14px 25px;
+        border: none;
+        background: #2563eb;
+        color: white;
+        font-size: 16px;
+        border-radius: 10px;
+        cursor: pointer;
+    }
+
+    .suggestions {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .suggestion {
+        padding: 8px 12px;
+        background: #e5e7eb;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .result {
+        margin-top: 30px;
+        padding: 25px;
+        border-radius: 12px;
+        background: #f9fafb;
+        border: 1px solid #ddd;
+    }
+
+    .stock-name {
+        font-size: 28px;
+        font-weight: bold;
+    }
+
+    .info {
+        margin: 10px 0;
+        font-size: 18px;
+    }
+
+    .up {
+        color: red;
+        font-weight: bold;
+    }
+
+    .down {
+        color: blue;
+        font-weight: bold;
+    }
+
+    .chart-box {
+        margin-top: 30px;
+    }
+
+    .time {
+        text-align: center;
+        margin-top: 20px;
+        color: gray;
+    }
+</style>
+
+<script>
+    let stockData = [];
+    let historyData = {};
+    let chart = null;
+
+    async function loadData() {
+        const stockResponse = await fetch("stock.json?t=" + new Date().getTime());
+        stockData = await stockResponse.json();
+
+        try {
+            const historyResponse = await fetch("history.json?t=" + new Date().getTime());
+            historyData = await historyResponse.json();
+        } catch {
+            historyData = {};
+        }
+    }
+
+    async function searchStock() {
+        await loadData();
+
+        const name = document.getElementById("stockName").value.trim();
+        const resultDiv = document.getElementById("result");
+
+        if (name.length === 0) {
+            resultDiv.innerHTML = "<div class='info'>종목명을 입력하세요.</div>";
+            return;
+        }
+
+        const matches = stockData
+            .filter(item =>
+                item.name &&
+                item.name.includes(name)
+            )
+            .sort((a, b) => {
+                if (!a.date) return 1;
+                if (!b.date) return -1;
+                return b.date.localeCompare(a.date);
+            });
+
+        const stock = matches[0];
+
+        if (stock) {
+            let rateClass = "up";
+
+            if (parseFloat(stock.rate) < 0) {
+                rateClass = "down";
+            }
+
+            resultDiv.innerHTML = `
+                <div class="stock-name">${stock.name}</div>
+                <div class="info">기준일자: ${stock.date}</div>
+                <div class="info">종목코드: ${stock.code}</div>
+                <div class="info">현재가: ${Number(stock.price).toLocaleString()}원</div>
+                <div class="info">전일대비: ${stock.change}</div>
+                <div class="info ${rateClass}">등락률: ${stock.rate}%</div>
+                <div class="info">시장구분: ${stock.market}</div>
+            `;
+
+            drawChart(stock.name, stock.price);
+        } else {
+            resultDiv.innerHTML = "<div class='info'>검색 결과가 없습니다.</div>";
+        }
+    }
+
+    function drawChart(stockName, currentPrice) {
+        let labels = [];
+        let prices = [];
+
+        const history = historyData[stockName];
+
+        if (history && history.length > 0) {
+            labels = history.map(item => item.time);
+            prices = history.map(item => Number(item.price));
+        } else {
+            labels = ["현재"];
+            prices = [Number(currentPrice)];
+        }
+
+        const ctx = document.getElementById("stockChart");
+
+        if (chart) {
+            chart.destroy();
+        }
+
+        chart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: stockName + " 가격",
+                    data: prices,
+                    borderWidth: 2,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true
+            }
+        });
+    }
+
+    async function showSuggestions() {
+        if (stockData.length === 0) {
+            await loadData();
+        }
+
+        const keyword = document.getElementById("stockName").value.trim();
+        const suggestionsDiv = document.getElementById("suggestions");
+
+        suggestionsDiv.innerHTML = "";
+
+        if (keyword.length === 0) {
+            return;
+        }
+
+        const matches = stockData
+            .filter(item =>
+                item.name &&
+                item.name.includes(keyword)
+            )
+            .slice(0, 10);
+
+        matches.forEach(stock => {
+            const div = document.createElement("div");
+            div.className = "suggestion";
+            div.textContent = stock.name;
+
+            div.onclick = function () {
+                document.getElementById("stockName").value = stock.name;
+                suggestionsDiv.innerHTML = "";
+                searchStock();
+            };
+
+            suggestionsDiv.appendChild(div);
+        });
+    }
+
+    function handleEnter(event) {
+        if (event.key === "Enter") {
+            searchStock();
+        }
+    }
+
+    function updateTime() {
+        const now = new Date();
+
+        document.getElementById("time").innerHTML =
+            "마지막 접속 시간 : " + now.toLocaleString();
+    }
+
+    loadData();
+    updateTime();
+</script>
+
+</body>
+</html>

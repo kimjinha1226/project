@@ -1,0 +1,14 @@
+services:
+  generator:
+    build: ./generator
+    volumes:
+      - ./html:/app/html
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./html:/usr/share/nginx/html
+    depends_on:
+      - generator
